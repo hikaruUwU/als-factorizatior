@@ -1,6 +1,6 @@
 import os
 
-from enviroment import DB_URI
+from enviroment import DB_URI, FETCH_SQL, OUTPUT_DIR, NUM_FACTORS, TOP_K_RECO
 
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 
@@ -16,12 +16,8 @@ from tqdm import tqdm
 engine = create_engine(DB_URI, pool_recycle=3600)
 
 def get_data_from_mysql_sqlalchemy():
-    sql = """
-    SELECT user, item, times AS rating 
-    FROM suki;
-    """
     try:
-        data = pd.read_sql(sql, engine)
+        data = pd.read_sql(FETCH_SQL, engine)
         return data
     except Exception as ignored:
         return pd.DataFrame()
@@ -41,7 +37,7 @@ df['user_index'] = df['user'].map(user_to_index)
 df['item_index'] = df['item'].map(item_to_index)
 
 index_to_item = {i: item for item, i in item_to_index.items()}
-# 增加索引到用户ID的映射 (用于批量导出)
+
 index_to_user = {i: user for user, i in user_to_index.items()}
 
 N_USERS = len(user_to_index)
@@ -59,8 +55,6 @@ data_weighted = bm25_weight(user_item_matrix, K1=100, B=0.8)
 
 item_user_matrix = data_weighted.T.tocsr()
 
-NUM_FACTORS = 64
-TOP_K_RECO = 100
 
 model = AlternatingLeastSquares(
     factors=NUM_FACTORS,
@@ -71,13 +65,13 @@ model = AlternatingLeastSquares(
 model.fit(item_user_matrix)
 print("\nTrained.")
 
-output_dir = 'recommendation_data'
+output_dir = OUTPUT_DIR
 os.makedirs(output_dir, exist_ok=True)
 recommendation_list = []
 
-print(f"Generating TOP {TOP_K_RECO} recommendations.")
+print(f"Generating relative TOP {TOP_K_RECO} foreach.")
 
-for user_index in tqdm(range(N_USERS), desc="Calculating User Recommendations"):
+for user_index in tqdm(range(N_USERS), desc="Calculating"):
 
     original_user_id = index_to_user[user_index]
     single_user_row = user_item_matrix.getrow(user_index)
@@ -98,9 +92,8 @@ for user_index in tqdm(range(N_USERS), desc="Calculating User Recommendations"):
 
     recommendation_list.append(row_data)
 
-print("\nRecommendation generation complete.")
+print("\nComplete.")
 
-# --- 导出特征矩阵 (保持不变) ---
 user_factors = model.user_factors
 df_user_factors = pd.DataFrame(user_factors)
 df_user_factors.index = user_to_index.keys()
@@ -114,11 +107,10 @@ df_item_factors.index = item_to_index.keys()
 df_item_factors.index.name = 'item_id'
 item_factors_path = os.path.join(output_dir, 'item_factors.csv')
 df_item_factors.to_csv(item_factors_path, header=False, index=True, float_format='%.6f')
-print("Matrix are exported.")
 
 header = ['user_id'] + [f'reco_{i + 1}' for i in range(TOP_K_RECO)]
 df_recommendations = pd.DataFrame(recommendation_list, columns=header)
 recommendation_csv_path = os.path.join(output_dir, f'recommendations_top_{TOP_K_RECO}.csv')
 df_recommendations.to_csv(recommendation_csv_path, index=False, header=True)
 
-print(f"Recommendations exported.")
+print("relatives exported.")
